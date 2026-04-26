@@ -7,7 +7,7 @@
 [![JS CI](https://github.com/assim98/typesense-langgraph-checkpointer/actions/workflows/js.yml/badge.svg)](https://github.com/assim98/typesense-langgraph-checkpointer/actions/workflows/js.yml)
 [![Python CI](https://github.com/assim98/typesense-langgraph-checkpointer/actions/workflows/python.yml/badge.svg)](https://github.com/assim98/typesense-langgraph-checkpointer/actions/workflows/python.yml)
 [![PyPI version](https://img.shields.io/pypi/v/langgraph-checkpoint-typesense?logo=python&logoColor=white)](https://pypi.org/project/langgraph-checkpoint-typesense/)
-[![npm version](https://img.shields.io/npm/v/@typesense-langgraph/checkpoint?logo=npm)](https://www.npmjs.com/package/@typesense-langgraph/checkpoint)
+[![npm version](https://img.shields.io/npm/v/@typesense-langgraph/checkpoint?logo=npm)](https://www.npmjs.com/package/@assim98/typesense-langgraph-checkpointer)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [Features](#-features) · [Installation](#-installation) · [Quick Start](#-quick-start) · [API Reference](#-api-reference) · [Development](#-development) · [Contributing](#-contributing)
