@@ -2,15 +2,15 @@ name: JS CI
 
 on:
   push:
-    paths:
-      - "js/**"
-      - ".github/workflows/js.yml"
+    branches:
+      - main
+      - develop
     tags:
       - "v*"
   pull_request:
-    paths:
-      - "js/**"
-      - ".github/workflows/js.yml"
+    branches:
+      - main
+      - develop
 
 jobs:
   test:
