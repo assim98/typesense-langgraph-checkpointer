@@ -1,10 +1,12 @@
 {
-  "name": "@typesense-langgraph/checkpoint",
+  "name": "@assim98/typesense-langgraph-checkpointer",
   "version": "0.1.0",
   "description": "LangGraph checkpointer backed by Typesense",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
@@ -20,5 +22,12 @@
     "vitest": "^3.0.0",
     "@types/node": "^20.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/assim98/typesense-langgraph-checkpointer.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
 }
