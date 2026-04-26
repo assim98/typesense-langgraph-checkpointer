@@ -66,6 +66,10 @@ jobs:
         run: cd js && npm ci
       - name: Build
         run: cd js && npm run build
+      - name: Copy README and LICENSE
+        run: |
+          cp README.md js/
+          cp LICENSE js/
       - name: Publish
         run: cd js && npm publish
         env:
