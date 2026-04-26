@@ -1,0 +1,48 @@
+name: JS CI
+
+on:
+  push:
+    paths:
+      - "js/**"
+      - ".github/workflows/js.yml"
+  pull_request:
+    paths:
+      - "js/**"
+      - ".github/workflows/js.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      typesense:
+        image: typesense/typesense:30.2
+        ports:
+          - "8108:8108"
+        env:
+          TYPESENSE_DATA_DIR: /tmp
+          TYPESENSE_API_KEY: test-api-key
+          TYPESENSE_ENABLE_CORS: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for Typesense
+        run: |
+          for i in {1..10}; do
+            curl -sf http://localhost:8108/health && break || sleep 2
+          done
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: cd js && npm ci
+
+      - name: Build
+        run: cd js && npm run build
+
+      - name: Run tests
+        env:
+          TYPESENSE_API_KEY: test-api-key
+        run: cd js && npm test
