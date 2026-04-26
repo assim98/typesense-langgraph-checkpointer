@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langgraph-checkpoint-typesense"
-version = "0.1.0"
+version = "0.1.4"
 description = "LangGraph checkpointer backed by Typesense"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = [
