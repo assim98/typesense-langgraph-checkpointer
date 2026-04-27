@@ -36,6 +36,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     apiKey: string;
     protocol?: string;
     connectionTimeoutSeconds?: number;
+    serde?: SerializerProtocol;
   }): TypesenseSaver {
     const client = new TypesenseClient({
       nodes: [{
@@ -46,7 +47,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
       apiKey: config.apiKey,
       connectionTimeoutSeconds: config.connectionTimeoutSeconds ?? 5,
     });
-    return new TypesenseSaver(client);
+    return new TypesenseSaver(client, config.serde);
   }
 
   async setup(): Promise<void> {
@@ -121,6 +122,8 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     const threadId = cfg.thread_id;
     const checkpointNs = cfg.checkpoint_ns ?? "";
     const checkpointId = cfg.checkpoint_id;
+
+    if (!threadId && !checkpointId) return undefined;
 
     let doc: Record<string, unknown>;
 
@@ -247,6 +250,8 @@ export class TypesenseSaver extends BaseCheckpointSaver {
         filterParts.push(`ts_ms:<${beforeDoc.ts_ms}`);
       } catch { return; }
     }
+
+    if (limit !== undefined && limit <= 0) return;
 
     const filterBy = filterParts.length ? filterParts.join(" && ") : undefined;
     let page = 1;

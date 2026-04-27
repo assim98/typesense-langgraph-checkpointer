@@ -321,6 +321,9 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
                 except typesense.exceptions.ObjectNotFound:
                     return
 
+        if limit is not None and limit <= 0:
+            return
+
         filter_by = " && ".join(filter_parts) if filter_parts else None
         page = 1
         per_page = 250
