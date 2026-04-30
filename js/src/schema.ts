@@ -1,4 +1,28 @@
 // js/src/schema.ts
+import type { Client as TypesenseClient } from "typesense";
+
+/** Minimal typed surface of the Typesense Documents API used by this library. */
+interface TypesenseDocumentsApi {
+  search(params: Record<string, unknown>): Promise<{
+    hits?: Array<{ document: Record<string, unknown> }>;
+  }>;
+  upsert(doc: Record<string, unknown>): Promise<Record<string, unknown>>;
+  delete(params: { filter_by: string }): Promise<unknown>;
+}
+
+/**
+ * Return a typed handle to a collection's documents endpoint.
+ * The single `as any` cast is isolated here so the rest of the codebase
+ * remains type-safe.
+ */
+export function collectionDocuments(
+  client: TypesenseClient,
+  collection: string
+): TypesenseDocumentsApi {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return client.collections(collection).documents() as any;
+}
+
 export const CHECKPOINTS_COLLECTION = "langgraph_checkpoints";
 export const WRITES_COLLECTION = "langgraph_checkpoint_writes";
 

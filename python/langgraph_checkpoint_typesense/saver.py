@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, AsyncIterator, Iterator, Optional, Sequence
 
 import typesense
@@ -65,8 +65,8 @@ def _ts_to_ms(ts: str) -> int:
     return int(dt.timestamp() * 1000)
 
 
-def _fv(val: str) -> str:
-    """Strip backticks from filter values (Typesense filter syntax)."""
+def _sanitize_filter_value(val: str) -> str:
+    """Strip backticks from filter values to prevent Typesense filter injection."""
     return val.replace("`", "")
 
 
@@ -158,8 +158,8 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
                 "q": "*",
                 "query_by": "checkpoint_id",
                 "filter_by": (
-                    f"checkpoint_id:=`{_fv(checkpoint_id)}` && "
-                    f"thread_id:=`{_fv(thread_id)}`"
+                    f"checkpoint_id:=`{_sanitize_filter_value(checkpoint_id)}` && "
+                    f"thread_id:=`{_sanitize_filter_value(thread_id)}`"
                 ),
                 "per_page": 250,
                 "sort_by": "idx:asc",
@@ -194,9 +194,9 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
         else:
             # Typesense does not support filtering on empty strings with backtick
             # syntax, so only add checkpoint_ns to the filter when it is non-empty.
-            filter_by = f"thread_id:=`{_fv(thread_id)}`"
+            filter_by = f"thread_id:=`{_sanitize_filter_value(thread_id)}`"
             if checkpoint_ns:
-                filter_by += f" && checkpoint_ns:=`{_fv(checkpoint_ns)}`"
+                filter_by += f" && checkpoint_ns:=`{_sanitize_filter_value(checkpoint_ns)}`"
             results = await asyncio.to_thread(
                 self._client.collections[CHECKPOINTS_COLLECTION].documents.search,
                 {
@@ -304,9 +304,9 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
 
         filter_parts: list[str] = []
         if thread_id:
-            filter_parts.append(f"thread_id:=`{_fv(thread_id)}`")
+            filter_parts.append(f"thread_id:=`{_sanitize_filter_value(thread_id)}`")
             if checkpoint_ns:  # only add ns filter when non-empty (Typesense empty string bug)
-                filter_parts.append(f"checkpoint_ns:=`{_fv(checkpoint_ns)}`")
+                filter_parts.append(f"checkpoint_ns:=`{_sanitize_filter_value(checkpoint_ns)}`")
 
         if before:
             before_id = get_checkpoint_id(before)
@@ -320,6 +320,9 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
                     filter_parts.append(f"ts_ms:<{before_doc['ts_ms']}")
                 except typesense.exceptions.ObjectNotFound:
                     return
+
+        if limit is not None and limit <= 0:
+            return
 
         filter_by = " && ".join(filter_parts) if filter_parts else None
         page = 1
@@ -367,7 +370,7 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
         for collection in [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]:
             await asyncio.to_thread(
                 self._client.collections[collection].documents.delete,
-                {"filter_by": f"thread_id:=`{_fv(thread_id)}`"},
+                {"filter_by": f"thread_id:=`{_sanitize_filter_value(thread_id)}`"},
             )
 
     # Sync stubs — this checkpointer is async-only
