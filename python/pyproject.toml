@@ -38,5 +38,9 @@ select = ["E", "W", "F", "I"]
 ignore_missing_imports = true
 python_version = "3.9"
 
+[[tool.mypy.overrides]]
+module = ["_pytest.*", "pytest.*"]
+ignore_errors = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["langgraph_checkpoint_typesense"]
