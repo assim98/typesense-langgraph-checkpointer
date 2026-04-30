@@ -180,13 +180,15 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
         checkpoint_ns: str = configurable.get("checkpoint_ns", "")
         checkpoint_id: Optional[str] = get_checkpoint_id(config)
 
+        doc: dict[str, Any]
         if checkpoint_id:
             try:
-                doc = await asyncio.to_thread(
+                raw_doc = await asyncio.to_thread(
                     self._client.collections[CHECKPOINTS_COLLECTION]
                     .documents[_checkpoint_doc_id(checkpoint_id)]
                     .retrieve
                 )
+                doc = cast(dict[str, Any], raw_doc)
             except typesense.exceptions.ObjectNotFound:
                 return None
         else:
