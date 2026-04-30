@@ -40,7 +40,7 @@ python_version = "3.9"
 
 [[tool.mypy.overrides]]
 module = ["_pytest.*", "pytest.*"]
-ignore_errors = true
+follow_imports = "skip"
 
 [tool.hatch.build.targets.wheel]
 packages = ["langgraph_checkpoint_typesense"]
