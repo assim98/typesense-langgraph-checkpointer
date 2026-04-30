@@ -44,6 +44,9 @@ jobs:
       - name: Build
         run: cd js && npm run build
 
+      - name: Lint
+        run: cd js && npm run lint
+
       - name: Run tests
         env:
           TYPESENSE_API_KEY: test-api-key

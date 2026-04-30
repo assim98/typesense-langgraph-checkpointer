@@ -10,6 +10,7 @@ import {
   WRITES_COLLECTION,
   CHECKPOINTS_SCHEMA,
   WRITES_SCHEMA,
+  collectionDocuments,
 } from "../src/schema";
 
 describe("helpers", () => {
@@ -51,10 +52,82 @@ const client = new Typesense.Client({
   connectionTimeoutSeconds: 5,
 });
 
+// ---------------------------------------------------------------------------
+// Polling helpers
+// ---------------------------------------------------------------------------
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function pollUntil<T>(
+  fn: () => Promise<T | null | undefined>,
+  { timeout = 3000, interval = 50 } = {}
+): Promise<T> {
+  const deadline = Date.now() + timeout;
+  while (true) {
+    const result = await fn();
+    if (result != null) return result as T;
+    if (Date.now() >= deadline) throw new Error(`pollUntil timed out after ${timeout}ms`);
+    await sleep(interval);
+  }
+}
+
+async function pollListCount(
+  gen: () => AsyncGenerator<CheckpointTuple>,
+  count: number,
+  { timeout = 3000, interval = 50 } = {}
+): Promise<CheckpointTuple[]> {
+  const deadline = Date.now() + timeout;
+  while (true) {
+    const results = await collectList(gen());
+    if (results.length >= count) return results;
+    if (Date.now() >= deadline) throw new Error(`Expected >= ${count} checkpoints, timed out`);
+    await sleep(interval);
+  }
+}
+
+async function collectList(gen: AsyncGenerator<CheckpointTuple>): Promise<CheckpointTuple[]> {
+  const out: CheckpointTuple[] = [];
+  for await (const t of gen) out.push(t);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Test fixtures
+// ---------------------------------------------------------------------------
+
+function makeCheckpoint(tsMs: number = Date.now()): Checkpoint {
+  return {
+    v: 1,
+    id: randomUUID(),
+    ts: new Date(tsMs).toISOString(),
+    channel_values: {},
+    channel_versions: {},
+    versions_seen: {},
+    pending_sends: [],
+  };
+}
+const META: CheckpointMetadata = { source: "input", step: -1, parents: {} };
+
+async function cleanCollections(): Promise<void> {
+  for (const col of [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]) {
+    try {
+      await collectionDocuments(client, col).delete({ filter_by: 'thread_id:!=""' });
+    } catch { /* ignore */ }
+  }
+  // Brief wait for Typesense to process the deletes before the next test.
+  await sleep(50);
+}
+
+// ---------------------------------------------------------------------------
+// setup
+// ---------------------------------------------------------------------------
+
 describe("TypesenseSaver.setup", () => {
   beforeAll(async () => {
     for (const col of [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]) {
-      try { await client.collections(col).delete(); } catch {}
+      try { await client.collections(col).delete(); } catch { /* ignore */ }
     }
   });
 
@@ -62,7 +135,7 @@ describe("TypesenseSaver.setup", () => {
     const saver = new TypesenseSaver(client);
     await saver.setup();
     const cols = await client.collections().retrieve();
-    const names = (cols as Array<{name: string}>).map((c) => c.name);
+    const names = (cols as Array<{ name: string }>).map((c) => c.name);
     expect(names).toContain(CHECKPOINTS_COLLECTION);
     expect(names).toContain(WRITES_COLLECTION);
   });
@@ -78,36 +151,14 @@ describe("TypesenseSaver.setup", () => {
   });
 });
 
-function makeCheckpoint(tsMs: number = Date.now()): Checkpoint {
-  return {
-    v: 1,
-    id: randomUUID(),
-    ts: new Date(tsMs).toISOString(),
-    channel_values: {},
-    channel_versions: {},
-    versions_seen: {},
-    pending_sends: [],
-  };
-}
-const META: CheckpointMetadata = { source: "input", step: -1, parents: {} };
-
-async function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
-
-async function collectList(gen: AsyncGenerator<CheckpointTuple>): Promise<CheckpointTuple[]> {
-  const out: CheckpointTuple[] = [];
-  for await (const t of gen) out.push(t);
-  return out;
-}
+// ---------------------------------------------------------------------------
+// put + getTuple
+// ---------------------------------------------------------------------------
 
 describe("put + getTuple", () => {
   let saver: TypesenseSaver;
   beforeAll(async () => { saver = new TypesenseSaver(client); await saver.setup(); });
-  afterEach(async () => {
-    for (const col of [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]) {
-      try { await (client.collections(col).documents() as any).delete({ filter_by: 'thread_id:!=""' }); } catch {}
-    }
-    await sleep(100);
-  });
+  afterEach(cleanCollections);
 
   it("put returns config with checkpoint_id", async () => {
     const threadId = randomUUID();
@@ -127,17 +178,16 @@ describe("put + getTuple", () => {
     const c1 = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp1, META, {});
     const cp2 = makeCheckpoint(2000);
     await saver.put(c1, cp2, { source: "loop", step: 0, parents: {} }, {});
-    await sleep(150);
-    const result = await saver.getTuple({ configurable: { thread_id: threadId } });
-    expect(result?.checkpoint.id).toBe(cp2.id);
+    const result = await pollUntil(() => saver.getTuple({ configurable: { thread_id: threadId } }));
+    expect(result.checkpoint.id).toBe(cp2.id);
   });
 
   it("getTuple returns checkpoint by id", async () => {
     const threadId = randomUUID();
     const cp = makeCheckpoint();
     const saved = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp, META, {});
-    await sleep(150);
-    expect((await saver.getTuple(saved))?.checkpoint.id).toBe(cp.id);
+    const result = await pollUntil(() => saver.getTuple(saved));
+    expect(result.checkpoint.id).toBe(cp.id);
   });
 
   it("put stores parent_id", async () => {
@@ -146,21 +196,19 @@ describe("put + getTuple", () => {
     const c1 = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp1, META, {});
     const cp2 = makeCheckpoint(2000);
     const c2 = await saver.put(c1, cp2, { source: "loop", step: 0, parents: {} }, {});
-    await sleep(150);
-    const result = await saver.getTuple(c2);
-    expect(result?.parentConfig?.configurable?.checkpoint_id).toBe(cp1.id);
+    const result = await pollUntil(() => saver.getTuple(c2));
+    expect(result.parentConfig?.configurable?.checkpoint_id).toBe(cp1.id);
   });
 });
+
+// ---------------------------------------------------------------------------
+// putWrites
+// ---------------------------------------------------------------------------
 
 describe("putWrites", () => {
   let saver: TypesenseSaver;
   beforeAll(async () => { saver = new TypesenseSaver(client); await saver.setup(); });
-  afterEach(async () => {
-    for (const col of [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]) {
-      try { await (client.collections(col).documents() as any).delete({ filter_by: 'thread_id:!=""' }); } catch {}
-    }
-    await sleep(100);
-  });
+  afterEach(cleanCollections);
 
   it("stores writes retrievable via getTuple.pendingWrites", async () => {
     const threadId = randomUUID();
@@ -168,13 +216,27 @@ describe("putWrites", () => {
     const cp = makeCheckpoint();
     const saved = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp, META, {});
     await saver.putWrites(saved, [["channel_a", "hello"], ["channel_b", 42]], taskId);
-    await sleep(150);
-    const result = await saver.getTuple(saved);
-    const channels = result?.pendingWrites?.map(w => w[1]);
+    const result = await pollUntil(async () => {
+      const t = await saver.getTuple(saved);
+      return t?.pendingWrites?.length === 2 ? t : null;
+    });
+    const channels = result.pendingWrites?.map((w) => w[1]);
     expect(channels).toContain("channel_a");
     expect(channels).toContain("channel_b");
   });
+
+  it("stores task_path when provided", async () => {
+    const threadId = randomUUID();
+    const cp = makeCheckpoint();
+    const saved = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp, META, {});
+    await saver.putWrites(saved, [["ch", "v"]], randomUUID(), "root:0");
+    // No assertion on the stored value (internal field), just ensure no error thrown.
+  });
 });
+
+// ---------------------------------------------------------------------------
+// deleteThread
+// ---------------------------------------------------------------------------
 
 describe("deleteThread", () => {
   let saver: TypesenseSaver;
@@ -182,23 +244,28 @@ describe("deleteThread", () => {
 
   it("removes all checkpoints", async () => {
     const threadId = randomUUID();
-    await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, makeCheckpoint(), META, {});
-    await sleep(150);
+    const saved = await saver.put(
+      { configurable: { thread_id: threadId, checkpoint_ns: "" } },
+      makeCheckpoint(), META, {}
+    );
+    await pollUntil(() => saver.getTuple(saved));
     await saver.deleteThread(threadId);
-    await sleep(150);
+    await pollUntil(async () => {
+      const r = await saver.getTuple({ configurable: { thread_id: threadId } });
+      return r === undefined ? true : null;
+    });
     expect(await saver.getTuple({ configurable: { thread_id: threadId } })).toBeUndefined();
   });
 });
 
+// ---------------------------------------------------------------------------
+// list
+// ---------------------------------------------------------------------------
+
 describe("list", () => {
   let saver: TypesenseSaver;
   beforeAll(async () => { saver = new TypesenseSaver(client); await saver.setup(); });
-  afterEach(async () => {
-    for (const col of [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]) {
-      try { await (client.collections(col).documents() as any).delete({ filter_by: 'thread_id:!=""' }); } catch {}
-    }
-    await sleep(100);
-  });
+  afterEach(cleanCollections);
 
   it("returns all checkpoints latest-first", async () => {
     const threadId = randomUUID();
@@ -206,9 +273,9 @@ describe("list", () => {
     const c1 = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp1, META, {});
     const cp2 = makeCheckpoint(2000);
     await saver.put(c1, cp2, { source: "loop", step: 0, parents: {} }, {});
-    await sleep(150);
-    const results = await collectList(saver.list({ configurable: { thread_id: threadId } }));
-    expect(results).toHaveLength(2);
+    const results = await pollListCount(
+      () => saver.list({ configurable: { thread_id: threadId } }), 2
+    );
     expect(results[0].checkpoint.id).toBe(cp2.id);
   });
 
@@ -217,7 +284,7 @@ describe("list", () => {
     const cp1 = makeCheckpoint(1000);
     const c1 = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp1, META, {});
     await saver.put(c1, makeCheckpoint(2000), { source: "loop", step: 0, parents: {} }, {});
-    await sleep(150);
+    await pollListCount(() => saver.list({ configurable: { thread_id: threadId } }), 2);
     const results = await collectList(saver.list({ configurable: { thread_id: threadId } }, { limit: 1 }));
     expect(results).toHaveLength(1);
   });
@@ -228,7 +295,7 @@ describe("list", () => {
     const c1 = await saver.put({ configurable: { thread_id: threadId, checkpoint_ns: "" } }, cp1, META, {});
     const cp2 = makeCheckpoint(2000);
     await saver.put(c1, cp2, { source: "loop", step: 0, parents: {} }, {});
-    await sleep(150);
+    await pollListCount(() => saver.list({ configurable: { thread_id: threadId } }), 2);
     const results = await collectList(
       saver.list({ configurable: { thread_id: threadId } }, { filter: { source: "loop" } })
     );

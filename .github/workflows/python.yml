@@ -43,6 +43,11 @@ jobs:
           cd python
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+      - name: Lint and type-check
+        run: |
+          cd python
+          ruff check langgraph_checkpoint_typesense/
+          mypy langgraph_checkpoint_typesense/
       - name: Run tests
         env:
           TYPESENSE_API_KEY: test-api-key
