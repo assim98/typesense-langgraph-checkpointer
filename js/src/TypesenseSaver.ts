@@ -20,6 +20,7 @@ import {
   writeDocId,
   tsToMs,
   filterVal,
+  collectionDocuments,
 } from "./schema";
 
 export class TypesenseSaver extends BaseCheckpointSaver {
@@ -36,6 +37,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     apiKey: string;
     protocol?: string;
     connectionTimeoutSeconds?: number;
+    serde?: SerializerProtocol;
   }): TypesenseSaver {
     const client = new TypesenseClient({
       nodes: [{
@@ -46,7 +48,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
       apiKey: config.apiKey,
       connectionTimeoutSeconds: config.connectionTimeoutSeconds ?? 5,
     });
-    return new TypesenseSaver(client);
+    return new TypesenseSaver(client, config.serde);
   }
 
   async setup(): Promise<void> {
@@ -55,8 +57,10 @@ export class TypesenseSaver extends BaseCheckpointSaver {
         await this.client.collections(schema.name).retrieve();
       } catch (e: unknown) {
         if ((e as { httpStatus?: number }).httpStatus === 404) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await this.client.collections().create(schema as any);
+          await this.client.collections().create(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            schema as any
+          );
         } else {
           throw e;
         }
@@ -96,8 +100,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     threadId: string,
     checkpointId: string
   ): Promise<Array<[string, string, unknown]>> {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const results: any = await (this.client.collections(WRITES_COLLECTION).documents() as any).search({
+    const results = await collectionDocuments(this.client, WRITES_COLLECTION).search({
       q: "*",
       query_by: "checkpoint_id",
       filter_by: `checkpoint_id:=\`${filterVal(checkpointId)}\` && thread_id:=\`${filterVal(threadId)}\``,
@@ -122,6 +125,8 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     const checkpointNs = cfg.checkpoint_ns ?? "";
     const checkpointId = cfg.checkpoint_id;
 
+    if (!threadId && !checkpointId) return undefined;
+
     let doc: Record<string, unknown>;
 
     if (checkpointId) {
@@ -137,8 +142,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     } else {
       const filterParts = [`thread_id:=\`${filterVal(threadId)}\``];
       if (checkpointNs) filterParts.push(`checkpoint_ns:=\`${filterVal(checkpointNs)}\``);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const results: any = await (this.client.collections(CHECKPOINTS_COLLECTION).documents() as any).search({
+      const results = await collectionDocuments(this.client, CHECKPOINTS_COLLECTION).search({
         q: "*",
         query_by: "thread_id",
         filter_by: filterParts.join(" && "),
@@ -182,8 +186,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     };
     if (parentId) doc.parent_checkpoint_id = parentId;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (this.client.collections(CHECKPOINTS_COLLECTION).documents() as any).upsert(doc);
+    await collectionDocuments(this.client, CHECKPOINTS_COLLECTION).upsert(doc);
 
     return { configurable: { thread_id: threadId, checkpoint_ns: checkpointNs, checkpoint_id: checkpointId } };
   }
@@ -191,7 +194,8 @@ export class TypesenseSaver extends BaseCheckpointSaver {
   async putWrites(
     config: RunnableConfig,
     writes: PendingWrite[],
-    taskId: string
+    taskId: string,
+    taskPath: string = ""
   ): Promise<void> {
     const cfg = (config.configurable ?? {}) as Record<string, string>;
     const { thread_id: threadId, checkpoint_ns: checkpointNs = "", checkpoint_id: checkpointId } = cfg;
@@ -200,8 +204,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
     for (let idx = 0; idx < writes.length; idx++) {
       const [channel, value] = writes[idx];
       const [valType, valBytes] = await this.serde.dumpsTyped(value);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (this.client.collections(WRITES_COLLECTION).documents() as any).upsert({
+      const doc: Record<string, unknown> = {
         id: writeDocId(checkpointId, taskId, idx),
         thread_id: threadId,
         checkpoint_ns: checkpointNs,
@@ -211,13 +214,15 @@ export class TypesenseSaver extends BaseCheckpointSaver {
         channel,
         type: valType,
         value: Buffer.from(valBytes).toString("base64"),
-      });
+      };
+      if (taskPath) doc.task_path = taskPath;
+      await collectionDocuments(this.client, WRITES_COLLECTION).upsert(doc);
     }
   }
 
   async deleteThread(threadId: string): Promise<void> {
     for (const col of [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]) {
-      await (this.client.collections(col).documents() as any).delete({
+      await collectionDocuments(this.client, col).delete({
         filter_by: `thread_id:=\`${filterVal(threadId)}\``,
       });
     }
@@ -248,6 +253,8 @@ export class TypesenseSaver extends BaseCheckpointSaver {
       } catch { return; }
     }
 
+    if (limit !== undefined && limit <= 0) return;
+
     const filterBy = filterParts.length ? filterParts.join(" && ") : undefined;
     let page = 1;
     const perPage = 250;
@@ -258,8 +265,7 @@ export class TypesenseSaver extends BaseCheckpointSaver {
       const params: Record<string, unknown> = { q: "*", query_by: "thread_id", per_page: thisPage, sort_by: "ts_ms:desc", page };
       if (filterBy) params.filter_by = filterBy;
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const results: any = await (this.client.collections(CHECKPOINTS_COLLECTION).documents() as any).search(params);
+      const results = await collectionDocuments(this.client, CHECKPOINTS_COLLECTION).search(params);
       const hits: Array<{ document: Record<string, unknown> }> = results.hits ?? [];
       if (!hits.length) break;
 
