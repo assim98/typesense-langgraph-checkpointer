@@ -3,14 +3,13 @@ from __future__ import annotations
 import asyncio
 import base64
 from datetime import datetime
-from typing import Any, AsyncIterator, Iterator, Optional, Sequence
+from typing import Any, AsyncIterator, Iterator, Optional, Sequence, cast
 
 import typesense
 import typesense.exceptions
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
-    ChannelVersions,
     Checkpoint,
     CheckpointMetadata,
     CheckpointTuple,
@@ -91,7 +90,7 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
         connection_timeout_seconds: int = 5,
     ) -> "AsyncTypesenseSaver":
         client = typesense.Client({
-            "nodes": [{"host": host, "port": str(port), "protocol": protocol}],
+            "nodes": [{"host": host, "port": str(port), "protocol": protocol}],  # type: ignore[list-item]
             "api_key": api_key,
             "connection_timeout_seconds": connection_timeout_seconds,
         })
@@ -106,7 +105,7 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
                 )
             except typesense.exceptions.ObjectNotFound:
                 await asyncio.to_thread(
-                    self._client.collections.create, schema
+                    self._client.collections.create, schema  # type: ignore[arg-type]
                 )
 
     def _doc_to_tuple(
@@ -154,7 +153,7 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
     ) -> list[tuple[str, str, Any]]:
         results = await asyncio.to_thread(
             self._client.collections[WRITES_COLLECTION].documents.search,
-            {
+            {  # type: ignore[arg-type]
                 "q": "*",
                 "query_by": "checkpoint_id",
                 "filter_by": (
@@ -167,13 +166,12 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
         )
         return [
             (
-                h["document"]["task_id"],
-                h["document"]["channel"],
-                self.serde.loads_typed(
-                    (h["document"]["type"], base64.b64decode(h["document"]["value"]))
-                ),
+                d["task_id"],
+                d["channel"],
+                self.serde.loads_typed((d["type"], base64.b64decode(d["value"]))),
             )
             for h in results.get("hits", [])
+            for d in [cast(dict[str, Any], h["document"])]
         ]
 
     async def aget_tuple(self, config: RunnableConfig) -> Optional[CheckpointTuple]:
@@ -210,7 +208,7 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
             hits = results.get("hits", [])
             if not hits:
                 return None
-            doc = hits[0]["document"]
+            doc = cast(dict[str, Any], hits[0]["document"])
 
         pending_writes = await self._fetch_pending_writes(thread_id, doc["checkpoint_id"])
         return self._doc_to_tuple(doc, pending_writes)
@@ -220,7 +218,7 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
         config: RunnableConfig,
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
-        new_versions: ChannelVersions,
+        new_versions: Any,
     ) -> RunnableConfig:
         configurable = config.get("configurable", {})
         thread_id: str = configurable["thread_id"]
@@ -342,14 +340,15 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
                 params["filter_by"] = filter_by
 
             results = await asyncio.to_thread(
-                self._client.collections[CHECKPOINTS_COLLECTION].documents.search, params
+                self._client.collections[CHECKPOINTS_COLLECTION].documents.search,
+                params,  # type: ignore[arg-type]
             )
             hits = results.get("hits", [])
             if not hits:
                 break
 
             for hit in hits:
-                doc = hit["document"]
+                doc = cast(dict[str, Any], hit["document"])
                 if filter:
                     meta: CheckpointMetadata = self.serde.loads_typed(
                         (doc["metadata_type"], base64.b64decode(doc["metadata"]))
@@ -370,7 +369,7 @@ class AsyncTypesenseSaver(BaseCheckpointSaver):
         for collection in [CHECKPOINTS_COLLECTION, WRITES_COLLECTION]:
             await asyncio.to_thread(
                 self._client.collections[collection].documents.delete,
-                {"filter_by": f"thread_id:=`{_sanitize_filter_value(thread_id)}`"},
+                {"filter_by": f"thread_id:=`{_sanitize_filter_value(thread_id)}`"},  # type: ignore[arg-type]
             )
 
     # Sync stubs — this checkpointer is async-only
