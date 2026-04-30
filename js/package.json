@@ -1,6 +1,6 @@
 {
   "name": "@assim98/typesense-langgraph-checkpointer",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "LangGraph checkpointer backed by Typesense",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
